@@ -1,0 +1,5 @@
+Pods/
+.symlinks/
+xcuserdata/
+DerivedData/
+*.xcuserstate
