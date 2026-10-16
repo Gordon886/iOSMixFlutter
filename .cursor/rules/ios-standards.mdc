@@ -1,0 +1,365 @@
+---
+description: iOS 宿主编码规范
+globs: "**/*.swift"
+alwaysApply: false
+---
+
+# iOS 编码规范
+
+部署目标是 iOS 15，界面使用 UIKit，依赖写在现有 `Podfile`。布局一律使用 SnapKit，不手写锚点或 `NSLayoutConstraint`。网络的官方客户端是 `URLSession`，出现 HTTP 时再引入 Alamofire。页面按 MVVM 拆开：控制器管生命周期和路由，界面在 View，展示规则在 ViewModel。没有数据边界时不提前加 Repository 或 DTO。
+
+## 一、架构契约
+
+### 1.1 何时分层
+
+有界面的页面都拆成三层，控制器里不搭建控件树：
+
+- **ViewController**：生命周期、导航栏、订阅状态、把点击转给 ViewModel、调用 `AppRouter`
+- **View**：控件层级、SnapKit 布局、按状态刷新显示
+- **ViewModel**：选择、校验、加载、刷新等展示规则。只有静态文案、没有规则时可以不建
+
+自定义控件单独成文件。同一页面有两个及以上控件时，放进 `Views/`。出现远程或本地数据时再加 Repository。外部字段和模型会分开变化时再加 DTO 与 Mapper。
+
+文件放进仓库里已经存在的 `App/` 目录。
+
+```
+App/
+├── Application/
+├── Design/                         # 颜色、字体、间距
+├── Flutter/                        # 引擎与通道，业务页面不放这里
+├── Router/
+└── Features/<Feature>/
+    ├── <Feature>ViewController.swift
+    ├── <Feature>View.swift
+    ├── <Feature>ViewModel.swift    # 有展示规则时
+    ├── Views/                      # 两个及以上自定义控件
+    ├── Domain/                     # 可选。有数据边界时
+    └── Data/                       # 可选。有远程或本地数据时
+```
+
+### 1.2 依赖方向
+
+有 ViewModel 和数据层时：
+
+```
+ViewController → ViewModel → Domain ← Data
+```
+
+- **必须**：ViewModel 不导入 `UIView`、`UIViewController`，也不导入 Alamofire、SnapKit
+- **必须**：Domain 不导入 UIKit 和第三方库
+- **必须**：Data 实现 Domain 里的 Repository 接口
+- **必须**：ViewController 依赖 ViewModel 和模型，不依赖 Data 的实现
+- **禁止**：再平行建立 `VIPER/`、`Clean/`、顶层 `ViewModels/`、`Services/`
+
+### 1.3 与 Flutter 模块的边界
+
+跨页跳转走统一路由。
+
+- **必须**：页面调用 `AppRouter.open(routeId:params:)`，路由 ID 来自 `AppRoute`
+- **必须**：修改 `AppRoute` 时同步修改 Flutter 的 `RouteRegistry`
+- **禁止**：业务页面自己 `push`、`present` 另一个业务页
+- **禁止**：业务页面引用 `FlutterEngine`、`MethodChannel` 或 `RouterBridge`
+- ViewModel 不持有 `AppRouter`。离开当前页的动作由 ViewController 调用路由
+
+### 1.4 命名
+
+遵循 [Swift API Design Guidelines](https://www.swift.org/documentation/api-design-guidelines/)：类型 `UpperCamelCase`，方法、属性 `lowerCamelCase`，名字在调用点读得通，省掉类型已经表达的词。布尔属性使用 `is`、`has`、`can`。文件名与主类型同名。
+
+| 关注点 | 命名 | 位置 |
+|---|---|---|
+| 页面 | `<Feature>ViewController` | `Features/<Feature>/` |
+| 视图 | `<Feature>View` | 同上，拆出后 |
+| ViewModel | `<Feature>ViewModel` | 同上 |
+| 状态 | `<Feature>ViewState` | 与 ViewModel 同文件，变长再拆 |
+| Repository 接口 | `<Feature>Repository` | `Domain/` |
+| Repository 实现 | `<Feature>RepositoryImpl` | `Data/` |
+| DTO | `<Feature><Thing>DTO` | `Data/` |
+| 模型 | `<Feature><Thing>` | `Domain/` |
+
+
+## 二、界面
+
+Apple 的布局系统是 Auto Layout。本工程的约束全部用 SnapKit 书写，由系统求解。内容贴着安全区，文字跟随动态字体，可点区域保持足够大。`UIStackView` 只负责把子视图排成一行或一列，栈本身和需要尺寸的子视图仍然用 SnapKit。
+
+### 2.1 布局约定
+
+- **必须**：约束到 `safeAreaLayoutGuide` 或布局边距，不手写状态栏和 Home 指示条的高度
+- **必须**：正文使用 `UIFont.preferredFont(forTextStyle:)`，需要随系统字号变化时打开 `adjustsFontForContentSizeCategory`
+- **必须**：可点击控件的热区不小于 44×44 pt
+- **必须**：颜色、间距放在 `App/Design/`。已有颜色继续加到 `AppColors`
+- **必须**：新页面用代码布局。`init?(coder:)` 标成 `unavailable`
+- 设计稿指定了固定展示字号时，可以在该文本上使用固定字号
+- 支持深色模式时，用带 `traitCollection` 的动态 `UIColor`，不要在控制器里写 `if userInterfaceStyle`
+
+纵向内容可以用栈排列，约束仍走 SnapKit：
+
+```swift
+let stack = UIStackView(arrangedSubviews: [titleLabel, actionButton])
+stack.axis = .vertical
+stack.spacing = AppSpacing.medium
+stack.snp.makeConstraints { make in
+    make.top.equalTo(view.safeAreaLayoutGuide).offset(AppSpacing.small)
+    make.leading.trailing.equalTo(view.safeAreaLayoutGuide).inset(AppSpacing.large)
+}
+```
+
+### 2.2 SnapKit
+
+SnapKit 是本工程唯一的约束写法。新页面、改布局都使用它，不使用 `topAnchor` 等锚点，也不调用 `NSLayoutConstraint.activate`。
+
+```swift
+contentView.snp.makeConstraints { make in
+    make.top.equalTo(view.safeAreaLayoutGuide).offset(AppSpacing.small)
+    make.leading.trailing.equalTo(view.safeAreaLayoutGuide).inset(AppSpacing.large)
+}
+```
+
+- 视图装入层级时调用一次 `makeConstraints`
+- 常量变化用 `updateConstraints`，或对已经保存的 `Constraint` 调用 `update(offset:)`
+- 约束关系本身改变时才 `remakeConstraints`
+- **禁止**在 `layoutSubviews` 里 `makeConstraints` 或 `remakeConstraints`
+- 不手写 `translatesAutoresizingMaskIntoConstraints`，SnapKit 会自己处理
+
+本工程通过 CocoaPods 集成 Flutter。SnapKit 6 只发布 Swift Package，CocoaPods 停在 5.7.1。这一版放在 `Vendor/SnapKit`，`Podfile` 用本地路径引入，安装时不走 CocoaPods CDN：
+
+```ruby
+pod 'SnapKit', :path => 'Vendor/SnapKit'
+```
+
+`Vendor/SnapKit/SnapKit.podspec` 的版本是 `5.7.1`。不要改成 SnapKit 6，也不要再手写锚点。
+
+
+## 三、MVVM
+
+View 负责把状态画出来。ViewController 订阅状态、转发点击，并把路由动作发出去。ViewModel 承载加载、刷新和展示规则。
+
+### 3.1 怎么选
+
+| 场景 | 选择 |
+|---|---|
+| 任何有界面的页面 | ViewController + View。控件和 SnapKit 约束放在 View |
+| 加载、刷新、校验、选择等展示规则 | 再加 ViewModel |
+| 静态文案，没有展示规则 | 不建 ViewModel。点击直接由控制器调用路由 |
+
+### 3.2 State
+
+状态不可变更新：改的是一份新值，再赋回去。页面上真会出现的 `initial`、`loading`、`refreshing`、`loaded`、`error` 才写进状态。
+
+首次加载进入 `loading`，再进入 `loaded` 或 `error`。刷新保留已有数据，用 `refreshing`。
+
+```swift
+struct HomeViewState: Equatable {
+    enum Status: Equatable {
+        case initial
+        case loading
+        case refreshing
+        case loaded
+        case error
+    }
+
+    var status: Status = .initial
+    var feed: HomeFeed?
+    var failure: Failure?
+
+    var isLoading: Bool { status == .loading }
+    var hasData: Bool { feed != nil }
+}
+```
+
+iOS 15 上用 Combine 把状态交给界面。`@Published` 属于 Combine，不需要把 SwiftUI 引进 UIKit 页面。`@Observable` 需要 iOS 17，部署目标仍是 15 时不用。新页面不引入 RxSwift。
+
+```swift
+import Combine
+
+final class HomeViewModel {
+    @Published private(set) var state = HomeViewState()
+
+    private let repository: HomeRepository
+
+    init(repository: HomeRepository) {
+        self.repository = repository
+    }
+
+    func load() async {
+        state.status = .loading
+        state.failure = nil
+        await fetch(success: .loaded)
+    }
+
+    func refresh() async {
+        guard state.hasData else {
+            await load()
+            return
+        }
+        state.status = .refreshing
+        state.failure = nil
+        await fetch(success: .loaded)
+    }
+
+    private func fetch(success: HomeViewState.Status) async {
+        do {
+            let feed = try await repository.loadHome()
+            state.feed = feed
+            state.status = success
+            state.failure = nil
+        } catch let failure as Failure {
+            state.status = .error
+            state.failure = failure
+        } catch {
+            state.status = .error
+            state.failure = .unknown
+        }
+    }
+}
+```
+
+控制器在 `viewDidLoad` 订阅，随控制器释放：
+
+```swift
+viewModel.$state
+    .receive(on: DispatchQueue.main)
+    .sink { [weak self] state in
+        self?.render(state)
+    }
+    .store(in: &cancellables)
+```
+
+### 3.3 职责
+
+- ViewController 不创建业务控件，不写布局。它持有 View 和 ViewModel，把状态交给 `View.render`，把点击交给 ViewModel
+- ViewModel 做流程、校验和状态转换。它调用 Repository，不解析 DTO，不写界面文案
+- 给用户看的句子在 View 里按 `Failure` 分支生成
+- 导航不写进 ViewModel，也不写进 View。离开页面由控制器调用 `AppRouter`
+- 请求返回后，页面已经离开就不再改界面。订阅使用 `[weak self]`
+- 视图不写选择、校验和加载规则。日期和数字的展示格式可以留在视图
+
+
+## 四、数据与网络
+
+有 HTTP 接口时才引入 Alamofire。它包在 `URLSession` 上，负责校验、解码、重试和拦截。ViewModel 只看到 Repository 返回的模型。
+
+```
+DataSource (Alamofire) → DTO → Mapper → Model → Repository → ViewModel → ViewController
+```
+
+DTO 用 `Codable`。字段名和 JSON 不一致时用 `CodingKeys`。
+
+```swift
+struct HomeBannerDTO: Decodable {
+    let eyebrow: String
+    let amount: String
+
+    enum CodingKeys: String, CodingKey {
+        case eyebrow
+        case amount
+    }
+}
+```
+
+Repository 持有 `Session`，Session 从外面传进来：
+
+```swift
+let banner = try await session.request(url, method: .get)
+    .validate()
+    .serializingDecodable(HomeBannerDTO.self)
+    .value
+```
+
+- **禁止**在页面或 ViewModel 里调用 `AF.request` 或 `Session.default`
+- **禁止**在 Alamofire 的请求封装函数里把错误吞掉
+- 拦截器只放三类：认证头、401 时的单飞刷新、Debug 日志
+- 刷新请求本身不再进入刷新拦截器
+- 不在拦截器里把 `AFError` 转成 `Failure`。转换放在 Repository
+- `JSONSerialization` 留在 Data 层，并且只用于 `Codable` 表达不了的响应
+
+引入时写进 `Podfile`：
+
+```ruby
+pod 'Alamofire', '~> 5.12'
+```
+
+5.12 系与 iOS 15 对齐。接口还没有时，用 Repository 的本地实现返回样本数据，不先加入 Alamofire。
+
+
+## 五、依赖进入页面的方式
+
+用构造函数把 Repository 传给 ViewModel，再把 ViewModel 传给 ViewController。路由创建页面时完成这次组装。
+
+多个页面共享同一个 `Session` 或 Repository 时，在 `AppDelegate` / `SceneDelegate` 启动路径上建一个组合根，再把依赖传下去。
+
+`AppRouter.shared` 只作为现有的路由入口。新的网络客户端和仓储不要再做成全局单例，也不要在 `viewDidLoad` 里临时查找依赖。
+
+
+## 六、错误处理
+
+失败用一个 `Failure` 枚举贯穿 Repository、ViewModel 和界面。
+
+```swift
+enum Failure: Error, Equatable {
+    case server(statusCode: Int?)
+    case noInternet
+    case timeout
+    case cancelled
+    case parsing
+    case unknown
+}
+```
+
+- Repository 捕获 `AFError`：取消对应 `cancelled`，`URLError.notConnectedToInternet` 对应 `noInternet`，超时对应 `timeout`，解码失败对应 `parsing`，带 HTTP 状态码的对应 `server`，其余对应 `unknown`
+- ViewModel 只捕获 `Failure`，放进状态
+- 界面按枚举分支写文案
+
+
+## 七、国际化
+
+只有设计稿上的一种语言时，文案可以写在界面里。出现第二种语言后，放进 String Catalog（`.xcstrings`）。
+
+日期、数字和货币用 `FormatStyle`、`DateFormatter` 或 `NumberFormatter`。
+
+
+## 八、代码风格
+
+- 页面和 ViewModel 使用 `final class`。能 `private` 的成员不放开
+- 用代码布局，不添加 `IBOutlet` 或隐式解包
+- 网络和磁盘放在 `async` 函数里。界面赋值发生在主线程，Combine 订阅使用 `receive(on: DispatchQueue.main)`
+- 不在主线程同步等待网络结果
+- 改动范围外的文件不顺手重排格式
+
+
+## 九、禁止事项
+
+| 禁止 | 原因 |
+|---|---|
+| 静态页生成 ViewModel、Repository、DTO | 没有展示规则或数据边界时不增加这些类型 |
+| 控制器里搭建页面控件树或写约束 | 界面放在 View，约束用 SnapKit |
+| 手写锚点或 `NSLayoutConstraint` | 布局统一用 SnapKit |
+| ViewModel 导入 UIKit 视图、SnapKit 或 Alamofire | 展示规则和界面、传输分开 |
+| ViewModel 调用 `AppRouter` 或 `push` | 路由留在 ViewController |
+| 业务页操作 Flutter 引擎或通道 | 引擎由 `Flutter/` 和 `Router/` 管理 |
+| 刷新时用 `loading` 清掉已有数据 | 用 `refreshing` 保留内容 |
+| 在 `layoutSubviews` 里重建 SnapKit 约束 | 约束在装载时建立 |
+| 页面里直接使用 `Session.default` | Session 由 Repository 持有 |
+| 拦截器里把 `AFError` 转成 `Failure` | 只在 Repository 转换 |
+| 新页面改用 RxSwift 或另一套架构 | 继续用本节的 ViewModel 与 Combine |
+| 部署目标仍是 iOS 15 时使用 `@Observable` | 该宏需要 iOS 17 |
+
+
+## 十、修改代码时
+
+改文件前先读相关代码，按 `App/Features`、`App/Router`、`App/Design` 的现有结构改。
+
+只改任务需要的范围。布局使用 `Podfile` 里已经固定的 SnapKit。Alamofire 只在这个功能有 HTTP 时写入。纯文案改动不新增 ViewModel。有界面的改动保持 ViewController、View、ViewModel 的分工。
+
+新增的数据页面再套用 ViewModel、State、DTO、Repository，并放进对应目录。
+
+数据页面改完后核对：
+
+- [ ] 文件在现有 `App/` 结构里，可选目录是因为这次用到了才出现
+- [ ] 依赖方向是 ViewController → ViewModel → Domain ← Data
+- [ ] 跨页跳转走 `AppRouter` 和 `AppRoute`，路由表与 Flutter 一起改
+- [ ] 首次加载会进入 `loading`；刷新不会清掉已有数据
+- [ ] ViewModel 没有视图类型，也没有路由调用
+- [ ] 控制器没有搭建控件树；界面在 View，自定义控件在 `Views/`
+- [ ] 视图没有选择、校验或加载规则
+- [ ] Repository 返回模型，Alamofire 错误在 Repository 收成 `Failure`
+- [ ] 约束全部是 SnapKit，贴着安全区，没有在 `layoutSubviews` 里重建

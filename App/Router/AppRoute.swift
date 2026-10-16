@@ -4,6 +4,7 @@ enum AppRoute: String {
     case login
     case home
     case detail
+    case deposit
 
     enum Runtime {
         case flutter
@@ -20,6 +21,8 @@ enum AppRoute: String {
         switch self {
         case .login, .home, .detail:
             return .flutter
+        case .deposit:
+            return .native
         }
     }
 
@@ -29,7 +32,7 @@ enum AppRoute: String {
             return .root
         case .home:
             return .replace
-        case .detail:
+        case .detail, .deposit:
             return .push
         }
     }

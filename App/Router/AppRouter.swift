@@ -84,21 +84,49 @@ final class AppRouter {
     }
 
     private func showNative(route: AppRoute, params: [String: Any], reply: @escaping (RouteResult) -> Void) {
-        guard route == .home else {
+        switch route {
+        case .home:
+            let name = (params["userName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let home = HomeViewController(userName: (name?.isEmpty == false ? name : nil) ?? "访客")
+            let navigation = UINavigationController(rootViewController: home)
+            navigation.navigationBar.prefersLargeTitles = true
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithOpaqueBackground()
+            appearance.backgroundColor = AppColors.background
+            navigation.navigationBar.standardAppearance = appearance
+            navigation.navigationBar.scrollEdgeAppearance = appearance
+            setRoot(navigation)
+            reply(.success())
+        case .deposit:
+            showDeposit(reply: reply)
+        case .login, .detail:
             reply(.error("route_not_found"))
+        }
+    }
+
+    func dismiss(_ controller: UIViewController) {
+        if let navigation = controller.navigationController, navigation.viewControllers.count > 1 {
+            navigation.popViewController(animated: true)
             return
         }
-        let name = (params["userName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let home = HomeViewController(userName: (name?.isEmpty == false ? name : nil) ?? "访客")
-        let navigation = UINavigationController(rootViewController: home)
-        navigation.navigationBar.prefersLargeTitles = true
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = AppColors.background
-        navigation.navigationBar.standardAppearance = appearance
-        navigation.navigationBar.scrollEdgeAppearance = appearance
-        setRoot(navigation)
-        reply(.success())
+        dismissTop()
+    }
+
+    func dismissTop() {
+        navigationController?.popViewController(animated: true)
+    }
+
+    private func showDeposit(reply: @escaping (RouteResult) -> Void) {
+        guard let navigationController else {
+            reply(.error("navigator_missing"))
+            return
+        }
+        let once = OnceReply(reply)
+        let page = DepositViewController()
+        page.onFinish = { result in
+            once.call(result)
+        }
+        navigationController.pushViewController(page, animated: true)
     }
 
     private func showFlutter(route: AppRoute, params: [String: Any], reply: @escaping (RouteResult) -> Void) {

@@ -1,3 +1,4 @@
+import SnapKit
 import UIKit
 
 final class HomeViewController: UIViewController {
@@ -67,14 +68,11 @@ final class HomeViewController: UIViewController {
         stack.spacing = 16
         stack.setCustomSpacing(8, after: badge)
         stack.setCustomSpacing(28, after: resultLabel)
-        stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
-
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
-            stack.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -24),
-        ])
+        stack.snp.makeConstraints { make in
+            make.top.equalTo(view.safeAreaLayoutGuide).offset(12)
+            make.leading.trailing.equalTo(view.safeAreaLayoutGuide).inset(24)
+        }
     }
 
     @objc private func openDetail() {

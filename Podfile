@@ -14,6 +14,8 @@ target 'App' do
   use_frameworks!
   use_modular_headers!
 
+  pod 'SnapKit', :path => 'Vendor/SnapKit'
+
   install_all_flutter_pods(flutter_application_path)
 end
 
