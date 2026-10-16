@@ -14,7 +14,7 @@ final class FlutterContainerController: FlutterViewController {
 
     @available(*, unavailable)
     required init(coder: NSCoder) {
-        fatalError("init(coder:) 不可用")
+        fatalError("init(coder:) 不可用1")
     }
 
     override func viewDidLoad() {

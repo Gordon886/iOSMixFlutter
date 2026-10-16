@@ -13,6 +13,19 @@ final class AppRouter {
         prepared = true
 
         let engine = engineManager.makeEngine()
+        // 当前引擎禁止在 run 之前注册通道，否则会触发
+        // setMessageHandlerOnChannel 的断言。
+        let started = engine.run(
+            withEntrypoint: nil,
+            libraryURI: nil,
+            initialRoute: "/",
+            entrypointArgs: ["hosted"]
+        )
+        if !started {
+            assertionFailure("Flutter Engine 启动失败")
+            return
+        }
+        GeneratedPluginRegistrant.register(with: engine)
         let bridge = RouterBridge(messenger: engine.binaryMessenger)
         bridge.onOpen = { [weak self] request, reply in
             guard let self else {
@@ -25,16 +38,6 @@ final class AppRouter {
             self?.handlePop(requestId: requestId, result: result)
         }
         self.bridge = bridge
-        GeneratedPluginRegistrant.register(with: engine)
-        let started = engine.run(
-            withEntrypoint: nil,
-            libraryURI: nil,
-            initialRoute: "/",
-            entrypointArgs: ["hosted"]
-        )
-        if !started {
-            assertionFailure("Flutter Engine 启动失败")
-        }
     }
 
     func attach(window: UIWindow) {
@@ -120,8 +123,13 @@ final class AppRouter {
                     return
                 }
                 navigationController.pushViewController(container, animated: true)
-            case .root, .replace:
+            case .root:
                 self.setRoot(container)
+                once.call(.success())
+            case .replace:
+                let navigation = UINavigationController(rootViewController: container)
+                navigation.setNavigationBarHidden(true, animated: false)
+                self.setRoot(navigation)
                 once.call(.success())
             }
         }

@@ -18,10 +18,8 @@ enum AppRoute: String {
 
     var runtime: Runtime {
         switch self {
-        case .login, .detail:
+        case .login, .home, .detail:
             return .flutter
-        case .home:
-            return .native
         }
     }
 
